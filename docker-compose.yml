@@ -1,0 +1,38 @@
+# Test bed: 4 chained services + Jaeger (traces) + Prometheus (metrics).
+# All ports bind to 127.0.0.1 because the services' /admin endpoints are unauthenticated.
+x-svc: &svc
+  image: python:3.12-slim
+  working_dir: /app
+  volumes: ["./demo:/app:ro"]
+  command: ["python", "-u", "service.py"]
+  depends_on: [jaeger]
+
+services:
+  jaeger:
+    image: jaegertracing/all-in-one:1.57
+    environment:
+      COLLECTOR_ZIPKIN_HOST_PORT: ":9411"
+      MEMORY_MAX_TRACES: "100000"
+    ports: ["127.0.0.1:16686:16686"]
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    volumes: ["./prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
+    ports: ["127.0.0.1:9090:9090"]
+
+  gateway:
+    <<: *svc
+    environment: {SERVICE: gateway, DOWNSTREAM: "http://orders:8080", ZIPKIN_URL: "http://jaeger:9411/api/v2/spans"}
+    ports: ["127.0.0.1:8081:8080"]
+  orders:
+    <<: *svc
+    environment: {SERVICE: orders, DOWNSTREAM: "http://payments:8080", ZIPKIN_URL: "http://jaeger:9411/api/v2/spans"}
+    ports: ["127.0.0.1:8082:8080"]
+  payments:
+    <<: *svc
+    environment: {SERVICE: payments, DOWNSTREAM: "http://ledger:8080", ZIPKIN_URL: "http://jaeger:9411/api/v2/spans"}
+    ports: ["127.0.0.1:8083:8080"]
+  ledger:
+    <<: *svc
+    environment: {SERVICE: ledger, ZIPKIN_URL: "http://jaeger:9411/api/v2/spans"}
+    ports: ["127.0.0.1:8084:8080"]
